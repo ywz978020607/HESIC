@@ -35,6 +35,10 @@ Pan Baidu :
 link：https://pan.baidu.com/s/1sSbMCl-6LXPal_asBt5Giw 
 code：k8rb 
 
+Google Drive: link: https://drive.google.com/drive/folders/1tTMs8vf7Z4FAjwCg2aQVGA_pc9O_VpS1?usp=sharing
+
+
+
 ## pretrained_models:
 
 Pan Baidu :
@@ -42,7 +46,7 @@ Pan Baidu :
 link：https://pan.baidu.com/s/1q0_2NZ46fYOCeDDg40nUaw 
 code：qrfu 
 
-
+Google Drive: link: https://drive.google.com/drive/folders/1tTMs8vf7Z4FAjwCg2aQVGA_pc9O_VpS1?usp=sharing
 
 
 
