@@ -51,6 +51,8 @@ Google Drive: link: https://drive.google.com/drive/folders/1tTMs8vf7Z4FAjwCg2aQV
 
 
 
+## Migration on Mindspore
+https://github.com/ywz978020607/2021Summer-Image-Compression
 
 
 
