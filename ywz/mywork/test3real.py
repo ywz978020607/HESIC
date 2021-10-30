@@ -208,20 +208,20 @@ def test_epoch(epoch, test_dataloader,modelhomo, model,model2, criterion):
 
     print(f'Test epoch {epoch}: Average losses:'
           f'\tTime: {time.strftime("%Y-%m-%d %H:%M:%S")} |'
-          f'\tLoss: {loss.val:.3f} |'
-          f'\tBPP: {bpp_loss.val:.3f} |'
-          f'\tBPP1: {bpp1.val:.3f} |'
-          f'\tBPP2: {bpp2.val:.3f} |'
-          f'\tMSE loss: {mse_loss.val:.4f} |'
-          f'\tPSNR (dB): {(psnr1.val+psnr2.val)/2:.3f} |'  #平均一张图的PSNR
-          f'\tMS-SSIM: {ssim_loss.val:.4f} |'  #已除2，相加时候便除了2
-          f'\tMS-SSIM1: {ssim_loss1.val:.4f} |'
-          f'\tMS-SSIM2: {ssim_loss2.val:.4f} |'
-          f'\tPSNR1: {psnr1.val:.3f} |'
-          f'\tPSNR2: {psnr2.val:.3f} \n'
+          f'\tLoss: {loss.avg:.3f} |'
+          f'\tBPP: {bpp_loss.avg:.3f} |'
+          f'\tBPP1: {bpp1.avg:.3f} |'
+          f'\tBPP2: {bpp2.avg:.3f} |'
+          f'\tMSE loss: {mse_loss.avg:.4f} |'
+          f'\tPSNR (dB): {(psnr1.avg+psnr2.avg)/2:.3f} |'  #平均一张图的PSNR
+          f'\tMS-SSIM: {ssim_loss.avg:.4f} |'  #已除2，相加时候便除了2
+          f'\tMS-SSIM1: {ssim_loss1.avg:.4f} |'
+          f'\tMS-SSIM2: {ssim_loss2.avg:.4f} |'
+          f'\tPSNR1: {psnr1.avg:.3f} |'
+          f'\tPSNR2: {psnr2.avg:.3f} \n'
           )
 
-    return loss.val
+    return loss.avg
 
 
 def save_checkpoint(state, is_best, filename='second_checkpoint.pth.tar'):

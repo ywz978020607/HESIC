@@ -216,13 +216,13 @@ def test_epoch(epoch, test_dataloader, model, criterion):
         out_root_path_file.close()
         print(f'Test epoch {epoch}: Average losses:'
               f'\tTime: {time.strftime("%Y-%m-%d %H:%M:%S")} |'
-              f'\tReal_bpp: {realbpp.val:.3f} |'
-              f'\tPSNR (dB): {(psnr1.val + psnr2.val) / 2:.3f} |'  # 平均一张图的PSNR
-              f'\tPSNR1: {psnr1.val:.3f} |'
-              f'\tPSNR2: {psnr2.val:.3f} \n'
+              f'\tReal_bpp: {realbpp.avg:.3f} |'
+              f'\tPSNR (dB): {(psnr1.avg + psnr2.avg) / 2:.3f} |'  # 平均一张图的PSNR
+              f'\tPSNR1: {psnr1.avg:.3f} |'
+              f'\tPSNR2: {psnr2.avg:.3f} \n'
               )
 
-        return loss.val
+        return loss.avg
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -354,6 +354,9 @@ def main(argv):
     print(device)
     if device=='cuda':
         torch.cuda.set_device(args.cuda)
+        ##去随机--2021.10.29
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
     print('temp gpu device number:')
     print(torch.cuda.current_device())
     #net assign
