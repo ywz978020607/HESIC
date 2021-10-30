@@ -1,5 +1,5 @@
 # 单gpu版  # --learning-rate 5e-5  1e-4 # --lambda 0.001
-#python newtrain1_joint.py -d "/home/sharklet/database/aftercut512"  --seed 0 --cuda 0 --patch-size 512 512 --batch-size 1 --test-batch-size 1  --save --lambda
+#python newtrain1_joint.py -d "/home/ywz/database/aftercut512"  --seed 0 --cuda 0 --patch-size 512 512 --batch-size 1 --test-batch-size 1  --save --lambda 0.01
 #python newtrain1_joint.py -d "/home/ywz/database/aftercut512"  -da "/home/ywz/database/flickr"  --seed 0 --cuda 2 --patch-size 512 512 --test-patch-size 960 640 --batch-size 1 --test-batch-size 1  --save  --lambda 0.01 -e 300
 
 import argparse
@@ -112,7 +112,7 @@ def train_epoch(epoch, train_dataloader, model, criterion, optimizer,
 
 
 def test_epoch(epoch, test_dataloader, model, criterion):
-    model.eavg()
+    model.eval()
     device = next(model.parameters()).device
 
     loss = AverageMeter()
