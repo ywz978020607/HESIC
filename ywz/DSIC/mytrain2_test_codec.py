@@ -1,5 +1,5 @@
 # 单gpu版
-#python mytrain3_test_codec.py -d "/home/ywz/database/aftercut512"  --seed 0 --cuda 0 --patch-size 512 512 --batch-size 1 --test-batch-size 1
+#python mytrain2_test_codec.py -d "/home/ywz/database/aftercut512"  --seed 0 --cuda 0 --patch-size 512 512 --batch-size 1 --test-batch-size 1
 import argparse
 import math
 import random
@@ -7,12 +7,11 @@ import shutil
 import os
 import sys
 import torch
+import time
 import torch.optim as optim
 import torch.nn as nn
 from pytorch_msssim import ssim, ms_ssim, SSIM, MS_SSIM
 from torch.autograd import Variable
-import time
-import os.path as osp
 
 from torch.utils.data import DataLoader
 
@@ -32,6 +31,7 @@ import matplotlib.pyplot as plt
 # from ywz.mytry.mypriors import *
 # from ywz.mytry.mynet6 import *
 from  mynet6_plus import *
+import os.path as osp
 
 
 out_root_path = "out_pic"
@@ -101,6 +101,46 @@ class AverageMeter:
         self.count += n
         self.avg = self.sum / self.count
 
+
+def train_epoch(epoch, train_dataloader, model, criterion, optimizer,
+                aux_optimizer,log_file = "log.txt"):
+    model.train()
+    device = next(model.parameters()).device
+
+    for i, d in enumerate(train_dataloader):
+        # print("dataloader::"+str(i))
+        d1 = d[0].to(device)  #load to gpu/cpu
+        d2 = d[1].to(device)  # load to gpu/cpu
+
+        optimizer.zero_grad()
+        aux_optimizer.zero_grad()
+
+        out_net = model(d1,d2)
+
+        out_criterion = criterion(out_net, d1,d2)
+        out_criterion['loss'].backward()
+        optimizer.step()
+
+        aux_loss = model.aux_loss()
+        aux_loss.backward()
+        aux_optimizer.step()
+
+        if i % 10 == 0:
+            log_data = f'Train epoch {epoch}: ['\
+                  f'{i*len(d)}/{len(train_dataloader.dataset)}'\
+                  f' ({100. * i / len(train_dataloader):.0f}%)]'\
+                  f'\tLoss: {out_criterion["loss"].item():.3f} |'\
+                  f'\tMSE loss: {out_criterion["mse_loss"].item():.3f} |'\
+                  f'\tBpp loss: {out_criterion["bpp_loss"].item():.2f} |'\
+                  f'\tAux loss: {aux_loss.item():.2f}'
+
+            print(log_data)
+            f = open(log_file,'a')
+            f.write(log_data)
+            f.write("\n")
+            f.close()
+
+
 def save_pic(data,path):
     if osp.exists(path):
         os.system("rm "+path)
@@ -108,13 +148,20 @@ def save_pic(data,path):
     reimage = data.cpu().clone()
     reimage[reimage > 1.0] = 1.0
 
+    # print(reimage.min())
+    # print(reimage.max())
+    # raise ValueError("stop")
+
+
+
     reimage = reimage.squeeze(0)
     reimage = transforms.ToPILImage()(reimage)  # PIL格式
     reimage.save(path)
 
-def test_epoch(epoch, test_dataloader, model,model2, criterion):
+
+def test_epoch(epoch, test_dataloader, model, criterion):
+    global  out_root_path_file
     model.eval()
-    model2.eval()
     device = next(model.parameters()).device
 
     loss = AverageMeter()
@@ -129,19 +176,16 @@ def test_epoch(epoch, test_dataloader, model,model2, criterion):
             d2 = d[1].to(device)
             name = str(d[2]).split("'")[1].split(".")[0]
             print(name)
+            
             # out_net = model(d1,d2)
-            # encode
-            out_net_en = model.compress(d1, d2, name, output_path=out_root_path)
+
+            #encode
+            out_net_en = model.compress(d1,d2, name,output_path=out_root_path)
             print("============================")
-            # decode
-            out_net = model.decompress(device, name, output_path=out_root_path)
+            #decode
+            out_net = model.decompress(device,name,output_path=out_root_path)
 
-            out_net2 = model2(out_net['x1_hat'], out_net['x2_hat'])
-
-            # out_criterion1 = criterion(out_net, d1, d2, need_bpp=True)
-            out_criterion = criterion(out_net2, d1, d2)
-            # out_criterion = criterion(out_net, d1,d2)
-
+            out_criterion = criterion(out_net, d1,d2)
 
             psnr1.update(out_criterion['psnr1'])
             psnr2.update(out_criterion['psnr2'])
@@ -155,7 +199,7 @@ def test_epoch(epoch, test_dataloader, model,model2, criterion):
 
             print_context = (str(d[2]).split("'")[1] +
                              f'\tPSNR (dB): {(psnr1_val + psnr2_val) / 2:.3f} |'  # 平均一张图的PSNR
-                             f'\tReal_bpp: {realbpp_val:.3f} |' 
+                             f'\tReal_bpp: {realbpp_val:.3f} |'
                              f'\tPSNR1: {psnr1_val:.3f} |'
                              f'\tPSNR2: {psnr2_val:.3f} \n')
 
@@ -163,8 +207,8 @@ def test_epoch(epoch, test_dataloader, model,model2, criterion):
             print(print_context)
 
             ##save pic
-            save_pic(out_net2['x1_hat'], osp.join(left_save_path, str(d[2]).split("'")[1]))
-            save_pic(out_net2['x2_hat'], osp.join(right_save_path, str(d[2]).split("'")[1]))
+            save_pic(out_net['x1_hat'], osp.join(left_save_path, str(d[2]).split("'")[1]))
+            save_pic(out_net['x2_hat'], osp.join(right_save_path, str(d[2]).split("'")[1]))
             print(str(d[2]).split("'")[1])
             ####
             # raise ValueError("codec sucessfully.")
@@ -172,19 +216,19 @@ def test_epoch(epoch, test_dataloader, model,model2, criterion):
         out_root_path_file.close()
         print(f'Test epoch {epoch}: Average losses:'
               f'\tTime: {time.strftime("%Y-%m-%d %H:%M:%S")} |'
-              f'\tReal_bpp: {realbpp.avg:.3f} |' 
-              f'\tPSNR (dB): {(psnr1.avg + psnr2.avg) / 2:.3f} |'  # 平均一张图的PSNR
-              f'\tPSNR1: {psnr1.avg:.3f} |'
-              f'\tPSNR2: {psnr2.avg:.3f} \n'
+              f'\tReal_bpp: {realbpp.val:.3f} |'
+              f'\tPSNR (dB): {(psnr1.val + psnr2.val) / 2:.3f} |'  # 平均一张图的PSNR
+              f'\tPSNR1: {psnr1.val:.3f} |'
+              f'\tPSNR2: {psnr2.val:.3f} \n'
               )
 
-        return loss.avg
+        return loss.val
 
 
-def save_checkpoint(state, is_best, filename='xxx.pth.tar'):
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, 'xxx.pth.tar')
+        shutil.copyfile(filename, 'checkpoint_best_loss.pth.tar')
 
 
 def parse_args(argv):
@@ -291,7 +335,7 @@ def main(argv):
                                split='test',
                                patch_size=args.patch_size,
                                transform=test_transforms,
-                                need_file_name = True)
+                               need_file_name = True)
 
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=args.batch_size,
@@ -310,44 +354,27 @@ def main(argv):
     print(device)
     if device=='cuda':
         torch.cuda.set_device(args.cuda)
-        ##去随机--2021.10.29
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
     print('temp gpu device number:')
     print(torch.cuda.current_device())
     #net assign
     # with torch.autograd.set_detect_anomaly(True): #for debug gradient
-    net1 = DSIC(N=128, M=192, F=21, C=32, K=5)  # (N=128,M=192,F=21,C=32,K=5)
-    net2 = Independent_EN()  # 增强!!!!
-    # 加载最新模型继续训练
+    net = DSIC(N=128,M=192,F=21,C=32,K=5) #(N=128,M=192,F=21,C=32,K=5)
+    #加载最新模型继续训练
     if os.path.exists("checkpoint_best_loss.pth.tar"):
         model = torch.load('checkpoint_best_loss.pth.tar', map_location=lambda storage, loc: storage)
         model.keys()
         # net.load_state_dict(torch.load('path/params.pkl'))
-        net1.load_state_dict(model['state_dict'])
+        net.load_state_dict(model['state_dict'])
         print("load model ok")
     else:
         print("train from none")
+    #update
+    net.entropy_bottleneck1.update()
+    net.entropy_bottleneck2.update()
 
-    # 加载最新模型继续训练
-    if os.path.exists("second_checkpoint_best_loss.pth.tar"):
-        model = torch.load('second_checkpoint_best_loss.pth.tar', map_location=lambda storage, loc: storage)
-        model.keys()
-        # net.load_state_dict(torch.load('path/params.pkl'))
-        net2.load_state_dict(model['state_dict'])
-        print("2load model ok")
-    else:
-        print("2train from none")
-
-    net1.entropy_bottleneck1.update()
-    net1.entropy_bottleneck2.update()
-
-    net1 = net1.to(device)
-    net2 = net2.to(device)
-
-    optimizer = optim.Adam(net2.parameters(), lr=args.learning_rate)
-    aux_optimizer = optim.Adam(net1.aux_parameters(), lr=args.aux_learning_rate)  # .m1才有aux_parameters()
-    print("lambda:", args.lmbda)
+    net = net.to(device)
+    optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
+    aux_optimizer = optim.Adam(net.aux_parameters(), lr=args.aux_learning_rate)
     criterion = RateDistortionLoss(lmbda=args.lmbda)
 
     # best_loss = 1e10
@@ -358,7 +385,7 @@ def main(argv):
     #
     #     try:
     #         #验证集
-        loss = test_epoch(epoch, test_dataloader, net1,net2, criterion)
+        loss = test_epoch(epoch, test_dataloader, net, criterion)
 
         #     is_best = loss < best_loss
         #     best_loss = min(loss, best_loss)

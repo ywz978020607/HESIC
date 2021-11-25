@@ -1,5 +1,5 @@
 # 单gpu版
-#python mytrain2_test_codec.py -d "/home/ywz/database/aftercut512"  --seed 0 --cuda 0 --patch-size 512 512 --batch-size 1 --test-batch-size 1
+#python mytrain2_test.py -d "/home/ywz/database/aftercut512"  --seed 0  --patch-size 512 512 --batch-size 1 --test-batch-size 1 --cuda 2
 import argparse
 import math
 import random
@@ -7,7 +7,6 @@ import shutil
 import os
 import sys
 import torch
-import time
 import torch.optim as optim
 import torch.nn as nn
 from pytorch_msssim import ssim, ms_ssim, SSIM, MS_SSIM
@@ -30,24 +29,7 @@ import matplotlib.pyplot as plt
 # from compressai.models import *
 # from ywz.mytry.mypriors import *
 # from ywz.mytry.mynet6 import *
-from  mynet6_plus import *
-import os.path as osp
-
-
-out_root_path = "out_pic"
-if not os.path.exists(out_root_path):
-    print("not ex")
-    os.system("mkdir "+out_root_path)
-left_save_path = osp.join(out_root_path,"left")
-right_save_path = osp.join(out_root_path,"right")
-if not os.path.exists(left_save_path):
-    os.system("mkdir " + left_save_path)
-if not os.path.exists(right_save_path):
-    os.system("mkdir " + right_save_path)
-
-#file
-out_root_path_file = open(osp.join(out_root_path,"details.txt"),'w')
-
+from  mynet6 import *
 
 def mse2psnr(mse):
     # 根据Hyper论文中的内容，将MSE->psnr(db)
@@ -66,20 +48,20 @@ class RateDistortionLoss(nn.Module):
         out = {}
         num_pixels = N * H * W
 
-        # # 计算误差
-        # out['bpp_loss'] = sum(
-        #     (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
-        #     for likelihoods in output['likelihoods'].values())
-        # out['mse_loss'] = self.mse(output['x1_hat'], target1) + self.mse(output['x2_hat'], target2)        #end to end
-        # out['bpp1'] = (torch.log(output['likelihoods']['y1']).sum() / (-math.log(2) * num_pixels)) + (
-        #             torch.log(output['likelihoods']['z1']).sum() / (-math.log(2) * num_pixels))
-        # out['bpp2'] = (torch.log(output['likelihoods']['y2']).sum() / (-math.log(2) * num_pixels)) + (
-        #             torch.log(output['likelihoods']['z2']).sum() / (-math.log(2) * num_pixels))
+        # 计算误差
+        out['bpp_loss'] = sum(
+            (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
+            for likelihoods in output['likelihoods'].values())
+        out['mse_loss'] = self.mse(output['x1_hat'], target1) + self.mse(output['x2_hat'], target2)        #end to end
+        out['bpp1'] = (torch.log(output['likelihoods']['y1']).sum() / (-math.log(2) * num_pixels)) + (
+                    torch.log(output['likelihoods']['z1']).sum() / (-math.log(2) * num_pixels))
+        out['bpp2'] = (torch.log(output['likelihoods']['y2']).sum() / (-math.log(2) * num_pixels)) + (
+                    torch.log(output['likelihoods']['z2']).sum() / (-math.log(2) * num_pixels))
 
-        # out['loss'] = self.lmbda * 255**2 * out['mse_loss'] + out['bpp_loss']
-        # out['ms_ssim1'] = ms_ssim(output['x1_hat'], target1, data_range=1, size_average=False)[0]  # (N,)
-        # out['ms_ssim2'] = ms_ssim(output['x2_hat'], target2, data_range=1, size_average=False)[0]
-        # out['ms_ssim'] = (out['ms_ssim1'] + out['ms_ssim2']) / 2
+        out['loss'] = self.lmbda * 255**2 * out['mse_loss'] + out['bpp_loss']
+        out['ms_ssim1'] = ms_ssim(output['x1_hat'], target1, data_range=1, size_average=False)[0]  # (N,)
+        out['ms_ssim2'] = ms_ssim(output['x2_hat'], target2, data_range=1, size_average=False)[0]
+        out['ms_ssim'] = (out['ms_ssim1'] + out['ms_ssim2']) / 2
 
         out['psnr1'] = mse2psnr(self.mse(output['x1_hat'], target1))
         out['psnr2'] = mse2psnr(self.mse(output['x2_hat'], target2))
@@ -141,88 +123,60 @@ def train_epoch(epoch, train_dataloader, model, criterion, optimizer,
             f.close()
 
 
-def save_pic(data,path):
-    if osp.exists(path):
-        os.system("rm "+path)
-        print("rm "+path)
-    reimage = data.cpu().clone()
-    reimage[reimage > 1.0] = 1.0
-
-    # print(reimage.min())
-    # print(reimage.max())
-    # raise ValueError("stop")
-
-
-
-    reimage = reimage.squeeze(0)
-    reimage = transforms.ToPILImage()(reimage)  # PIL格式
-    reimage.save(path)
-
 
 def test_epoch(epoch, test_dataloader, model, criterion):
-    global  out_root_path_file
     model.eval()
     device = next(model.parameters()).device
 
     loss = AverageMeter()
+    bpp_loss = AverageMeter()
+    mse_loss = AverageMeter()
+    aux_loss = AverageMeter()
+    ssim_loss = AverageMeter()
+    ssim_loss1 = AverageMeter()
+    ssim_loss2 = AverageMeter()
 
     psnr1 = AverageMeter()
     psnr2 = AverageMeter()
-    realbpp = AverageMeter()
+    bpp1 = AverageMeter()
+    bpp2 = AverageMeter()
 
     with torch.no_grad():
         for d in test_dataloader:
             d1 = d[0].to(device)
             d2 = d[1].to(device)
-            name = str(d[2]).split("'")[1].split(".")[0]
-            print(name)
-            
-            # out_net = model(d1,d2)
-
-            #encode
-            out_net_en = model.compress(d1,d2, name,output_path=out_root_path)
-            print("============================")
-            #decode
-            out_net = model.decompress(device,name,output_path=out_root_path)
-
+            out_net = model(d1,d2)
             out_criterion = criterion(out_net, d1,d2)
+
+            aux_loss.update(model.aux_loss())
+            bpp_loss.update(out_criterion['bpp_loss'])
+            loss.update(out_criterion['loss'])
+            mse_loss.update(out_criterion['mse_loss'])
+            ssim_loss.update(out_criterion['ms_ssim'])  # 已除2
+            ssim_loss1.update(out_criterion['ms_ssim1'])  # 已除2
+            ssim_loss2.update(out_criterion['ms_ssim2'])  # 已除2
 
             psnr1.update(out_criterion['psnr1'])
             psnr2.update(out_criterion['psnr2'])
-            realbpp.update(out_net_en['bpp_real'])
+            bpp1.update(out_criterion['bpp1'])
+            bpp2.update(out_criterion['bpp2'])
 
-            psnr1_val = out_criterion['psnr1']
-            psnr2_val = out_criterion['psnr2']
-            realbpp_val = out_net_en['bpp_real']
-            # bpp1_val = out_criterion1['bpp1']
-            # bpp2_val = out_criterion1['bpp2']
+    print(f'Test epoch {epoch}: Average losses:'
+          f'\tLoss: {loss.avg:.3f} |'
+          f'\tMSE loss: {mse_loss.avg:.5f} |'
+          f'\tPSNR (dB): {mse2psnr(mse_loss.avg/2):.3f} |'
+          f'\tBpp loss: {bpp_loss.avg/2:.4f} |'
+          f'\tPSNR1: {psnr1.avg:.3f} |'
+          f'\tPSNR2: {psnr2.avg:.3f} |'
+          f'\tBPP1: {bpp1.avg:.3f} |'
+          f'\tBPP2: {bpp2.avg:.3f} |'
+          
+          f'\tMS-SSIM: {ssim_loss.avg:.4f} |'  #已除2，相加时候便除了2
+          f'\tMS-SSIM1: {ssim_loss1.avg:.4f} |'
+          f'\tMS-SSIM2: {ssim_loss2.avg:.4f} |'
+          f'\tAux loss: {aux_loss.avg:.2f}\n')
 
-            print_context = (str(d[2]).split("'")[1] +
-                             f'\tPSNR (dB): {(psnr1_val + psnr2_val) / 2:.3f} |'  # 平均一张图的PSNR
-                             f'\tReal_bpp: {realbpp_val:.3f} |'
-                             f'\tPSNR1: {psnr1_val:.3f} |'
-                             f'\tPSNR2: {psnr2_val:.3f} \n')
-
-            out_root_path_file.write(print_context)
-            print(print_context)
-
-            ##save pic
-            save_pic(out_net['x1_hat'], osp.join(left_save_path, str(d[2]).split("'")[1]))
-            save_pic(out_net['x2_hat'], osp.join(right_save_path, str(d[2]).split("'")[1]))
-            print(str(d[2]).split("'")[1])
-            ####
-            # raise ValueError("codec sucessfully.")
-
-        out_root_path_file.close()
-        print(f'Test epoch {epoch}: Average losses:'
-              f'\tTime: {time.strftime("%Y-%m-%d %H:%M:%S")} |'
-              f'\tReal_bpp: {realbpp.avg:.3f} |'
-              f'\tPSNR (dB): {(psnr1.avg + psnr2.avg) / 2:.3f} |'  # 平均一张图的PSNR
-              f'\tPSNR1: {psnr1.avg:.3f} |'
-              f'\tPSNR2: {psnr2.avg:.3f} \n'
-              )
-
-        return loss.avg
+    return loss.avg
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -286,7 +240,7 @@ def parse_args(argv):
     parser.add_argument(
         '--cuda',
         type=int,
-        default=0,
+        default=-1,
         help='Use cuda')
     parser.add_argument(
         '--save',
@@ -329,13 +283,11 @@ def main(argv):
     train_dataset = ImageFolder(args.dataset,
                                 split='train',
                                 patch_size=args.patch_size,
-                                transform=train_transforms,
-                                need_file_name = True)
+                                transform=train_transforms)
     test_dataset = ImageFolder(args.dataset,
                                split='test',
                                patch_size=args.patch_size,
-                               transform=test_transforms,
-                               need_file_name = True)
+                               transform=test_transforms)
 
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=args.batch_size,
@@ -350,15 +302,13 @@ def main(argv):
                                  pin_memory=False)
 
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda' if (torch.cuda.is_available() and args.cuda != -1) else 'cpu'
     print(device)
     if device=='cuda':
         torch.cuda.set_device(args.cuda)
-        ##去随机--2021.10.29
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-    print('temp gpu device number:')
-    print(torch.cuda.current_device())
+        print('temp gpu device number:')
+        print(torch.cuda.current_device())
     #net assign
     # with torch.autograd.set_detect_anomaly(True): #for debug gradient
     net = DSIC(N=128,M=192,F=21,C=32,K=5) #(N=128,M=192,F=21,C=32,K=5)
@@ -371,9 +321,6 @@ def main(argv):
         print("load model ok")
     else:
         print("train from none")
-    #update
-    net.entropy_bottleneck1.update()
-    net.entropy_bottleneck2.update()
 
     net = net.to(device)
     optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)

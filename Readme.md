@@ -28,6 +28,24 @@ or
 
 
 
+## Errata notes
+
+Recently, when we pushed forward new work, we discovered that there was an error in the code, which led to the wrong results of the conference paper, and we made sufficient improvements and fine-tunings, and attached the final correct results.
+The reason for the error: We are based on the training and test scripts of the example/train.py internship of the CompressAI framework, but in the [2020.7 version](https://github.com/InterDigitalInc/CompressAI/blob/c1cf1f79c6a0489902d937d711ca9ec36e234102/examples/train.py), CompressAI incorrectly used the 'val' variable in the package class of 'AverageMeter'. It was not checked due to the time of submission and our negligence. 
+
+At the same time, we have completed the serialization part of the code, and used the left-eye decoded image to re-enter the left-eye code to guide the right-eye entropy model.
+
+（If using the old models and change 'avg' to ['val'](https://github.com/ywz978020607/HESIC/blob/546e0c0788552caee4ac75a229558ff64f295916/ywz/mywork/test3.py), the wrong results in the paper could be achieved.）
+
+
+
+Result.
+
+![Instereo2k](./cvpr-Instereo2k.png)
+
+
+
+
 ## datasets:
 
 Pan Baidu :
@@ -40,6 +58,7 @@ Google Drive: link: https://drive.google.com/drive/folders/1tTMs8vf7Z4FAjwCg2aQV
 
 
 ## pretrained_models:
+old models:
 
 Pan Baidu :
 
@@ -48,9 +67,10 @@ code：qrfu
 
 Google Drive: link: https://drive.google.com/drive/folders/1tTMs8vf7Z4FAjwCg2aQVGA_pc9O_VpS1?usp=sharing
 
+we will put the new models soon.
 
 
-# Serialize
+## Serialize
 
 cd ywz/mywork
 

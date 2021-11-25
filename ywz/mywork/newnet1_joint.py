@@ -657,7 +657,7 @@ class HSIC(CompressionModel):
         )
 
         self.entropy_parameters2 = nn.Sequential(
-            nn.Conv2d(M * 18 // 3, M * 10 // 3, 1), # (M * 12 // 3, M * 10 // 3, 1),
+            nn.Conv2d(5*M, M * 10 // 3, 1), #6M->5M  # (M * 12 // 3, M * 10 // 3, 1),
             nn.LeakyReLU(inplace=True),
             nn.Conv2d(M * 10 // 3, M * 8 // 3, 1),
             nn.LeakyReLU(inplace=True),
@@ -709,13 +709,18 @@ class HSIC(CompressionModel):
         z2 = self.h_a2(y2)
         z2_hat, z2_likelihoods = self.entropy_bottleneck2(z2)
 
-        #change
+        #change仍使用左目codec通道编x1_warp
+        x1_warp_aftercodec = kornia.warp_perspective(x1_hat, h_matrix, (x1.size()[-2],x1.size()[-1]))
+        y1_warpf2, _, _, _ = self.encoder1(x1_warp_aftercodec)
+        y1_hat_warpf2 = self.gaussian1._quantize(  # pylint: disable=protected-access
+            y1_warpf2, 'noise' if self.training else 'dequantize')
+        ##
         params2 = self.h_s2(z2_hat)
         y2_hat = self.gaussian_conditional2._quantize(  # pylint: disable=protected-access
             y2, 'noise' if self.training else 'dequantize')
         ctx_params2 = self.context_prediction2(y2_hat)
         gaussian_params2 = self.entropy_parameters2(
-            torch.cat((params2, ctx_params2, ctx_params1), dim=1))
+            torch.cat((params2, ctx_params2, y1_hat_warpf2), dim=1))
         scales_hat2, means_hat2 = gaussian_params2.chunk(2, 1)
         _, y2_likelihoods = self.gaussian_conditional1(y2,
                                                        scales_hat2,
@@ -971,7 +976,12 @@ class HSIC(CompressionModel):
         # end y1
 
         # y2
-
+        # change仍使用左目codec通道编x1_warp
+        x1_warp_aftercodec = kornia.warp_perspective(x1_hat, h_matrix, (x1.size()[-2], x1.size()[-1]))
+        y1_warpf2, _, _, _ = self.encoder1(x1_warp_aftercodec)
+        y1_hat_warpf2 = self.gaussian1._quantize(  # pylint: disable=protected-access
+            y1_warpf2, 'noise' if self.training else 'dequantize')
+        ##
         for h_idx in range(y2_hat_cpu_np.shape[2]):
             for w_idx in range(y2_hat_cpu_np.shape[3]):
                 # ctx_params2 = self.context_prediction2(y2_hat)
@@ -980,16 +990,16 @@ class HSIC(CompressionModel):
                 # scales_hat2, means_hat2 = gaussian_params2.chunk(2, 1)
                 # 如果是joint一类，在此计算当前像素点的概率
                 # 计算mask cnn  #逐像素计算
-                y1_crop = y1_hat[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
-                ctx_params1 = self.context_prediction1(y1_crop)
-                ctx_p1 = ctx_params1[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
+                # y1_crop = y1_hat[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
+                # ctx_params1 = self.context_prediction1(y1_crop)
+                # ctx_p1 = ctx_params1[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
 
                 y2_crop = y2_hat[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
                 ctx_params2 = self.context_prediction2(y2_crop)
                 ctx_p2 = ctx_params2[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
 
                 p2 = params2[0:0 + 1, :, h_idx:h_idx + 1, w_idx:w_idx + 1]
-                gaussian_params2 = self.entropy_parameters2(torch.cat((p2, ctx_p2,ctx_p1), dim=1))
+                gaussian_params2 = self.entropy_parameters2(torch.cat((p2, ctx_p2,y1_hat_warpf2[0:1,:,h_idx:h_idx+1,w_idx:w_idx+1]), dim=1))
                 scales_hat2, means_hat2 = gaussian_params2.chunk(2, 1)
 
                 for i in range(len(non_zero_idx_2)):
@@ -1206,16 +1216,22 @@ class HSIC(CompressionModel):
         x1_hat,g1_4,g1_5,g1_6 = self.decoder1(y1_hat)
 
         # y2
+        # change仍使用左目codec通道编x1_warp
+        x1_warp_aftercodec = kornia.warp_perspective(x1_hat, h_matrix, (x1.size()[-2], x1.size()[-1]))
+        y1_warpf2, _, _, _ = self.encoder1(x1_warp_aftercodec)
+        y1_hat_warpf2 = self.gaussian1._quantize(  # pylint: disable=protected-access
+            y1_warpf2, 'noise' if self.training else 'dequantize')
+        ##
         # 逐像素解码
-        y1_hat_copy = F.pad(y1_hat, (padding, padding, padding, padding))
+        # y1_hat_copy = F.pad(y1_hat, (padding, padding, padding, padding))
         for h_idx in range(y_shape[0]):
             for w_idx in range(y_shape[1]):
                 # 更新
                 # only perform the 5x5 convolution on a cropped tensor
                 # centered in (h, w)
-                y1_crop = y1_hat_copy[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
-                ctx_params1 = self.context_prediction1(y1_crop)
-                ctx_p1 = ctx_params1[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
+                # y1_crop = y1_hat_copy[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
+                # ctx_params1 = self.context_prediction1(y1_crop)
+                # ctx_p1 = ctx_params1[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
 
                 y2_crop = y2_hat[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
                 ctx_params2 = self.context_prediction2(y2_crop)
@@ -1224,7 +1240,7 @@ class HSIC(CompressionModel):
                 ctx_p2 = ctx_params2[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
 
                 p2 = params2[0:0 + 1, :, h_idx:h_idx + 1, w_idx:w_idx + 1]
-                gaussian_params2 = self.entropy_parameters2(torch.cat((p2, ctx_p2,ctx_p1), dim=1))
+                gaussian_params2 = self.entropy_parameters2(torch.cat((p2, ctx_p2,y1_hat_warpf2[0:1,:,h_idx:h_idx+1,w_idx:w_idx+1]), dim=1))
                 scales_hat2, means_hat2 = gaussian_params2.chunk(2, 1)
 
                 for i in range(len(non_zero_idx_2)):
@@ -1305,7 +1321,6 @@ class HSIC(CompressionModel):
         }
 
 
-
 class Independent_EN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -1332,4 +1347,23 @@ class Independent_EN(nn.Module):
 
 
 
+##合体版
+class GMM_together(nn.Module):
+    def __init__(self,N=128,M=192,K=5,**kwargs):
+        super().__init__()
+        self.m1 = HSIC(N,M,K)
+        self.m2 = Independent_EN()
+
+    def forward(self,x1,x2,h):
+        out1 = self.m1(x1,x2,h)
+        out2 = self.m2(out1['x1_hat'],out1['x2_hat'],h)
+        # out1['x1_hat'] = out2['x1_hat']
+        # out1['x2_hat'] = out2['x2_hat']
+        # return out1
+
+        return {
+            'x1_hat': out2['x1_hat'],
+            'x2_hat': out2['x2_hat'],
+            'likelihoods': out1['likelihoods'],
+        }
 

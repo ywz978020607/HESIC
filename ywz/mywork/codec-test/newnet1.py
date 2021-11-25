@@ -748,17 +748,9 @@ class HSIC(CompressionModel):
         ##end encoder
 
         # hyper for pic2
-
-        # change仍使用左目codec通道编x1_warp
-        x1_warp_aftercodec = kornia.warp_perspective(x1_hat, h_matrix, (x1.size()[-2], x1.size()[-1]))
-        y1_warpf2, _, _, _ = self.encoder1(x1_warp_aftercodec)
-        y1_hat_warpf2 = self.gaussian1._quantize(  # pylint: disable=protected-access
-            y1_warpf2, 'noise' if self.training else 'dequantize')
-        ##
-
         z2 = self._h_a2(y2)
         z2_hat, z2_likelihoods = self.entropy_bottleneck2(z2)
-        gmm2 = self._h_s2(z2_hat, y1_hat_warpf2)  # 三要素
+        gmm2 = self._h_s2(z2_hat, y1_hat)  # 三要素
 
         y2_hat, y2_likelihoods = self.gaussian2(y2, gmm2[0], gmm2[1], gmm2[2])  # 这里也是临时，待改gmm
         # end hyper for pic2
@@ -854,13 +846,7 @@ class HSIC(CompressionModel):
         z2_strings = self.entropy_bottleneck2.compress(z2)
         z2_hat = self.entropy_bottleneck2.decompress(z2_strings, z2.size()[-2:])  # z解码后结果（压缩时仍需要）
 
-        ##twiceLeft
-        x1_warp_aftercodec = kornia.warp_perspective(x1_hat, h_matrix, (x1.size()[-2], x1.size()[-1]))
-        y1_warpf2, _, _, _ = self.encoder1(x1_warp_aftercodec)
-        y1_hat_warpf2 = self.gaussian1._quantize(  # pylint: disable=protected-access
-            y1_warpf2, 'noise' if self.training else 'dequantize')
-
-        gmm2 = self._h_s2(z2_hat, y1_hat_warpf2)  # 三要素
+        gmm2 = self._h_s2(z2_hat, y1_hat)  # 三要素
 
         # y2_hat, y2_likelihoods = self.gaussian2(y2, gmm2[0], gmm2[1], gmm2[2])  # 这里也是临时，待改gmm
         y2_hat = self._quantize(y2, 'dequantize', means=None)
@@ -1184,15 +1170,7 @@ class HSIC(CompressionModel):
 
         # decoding for x1 and gmm2
         x1_hat,g1_4,g1_5,g1_6 = self.decoder1(y1_hat)
-
-        ##twiceLeft
-        x1_warp_aftercodec = kornia.warp_perspective(x1_hat, h_matrix, (x1.size()[-2], x1.size()[-1]))
-        y1_warpf2, _, _, _ = self.encoder1(x1_warp_aftercodec)
-        y1_hat_warpf2 = self.gaussian1._quantize(  # pylint: disable=protected-access
-            y1_warpf2, 'noise' if self.training else 'dequantize')
-
-        gmm2 = self._h_s2(z2_hat, y1_hat_warpf2)  # 三要素
-
+        gmm2 = self._h_s2(z2_hat, y1_hat)  # 三要素
 
         # y2
         for i in range(len(non_zero_idx_2)):

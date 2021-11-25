@@ -1111,8 +1111,9 @@ class DSIC(CompressionModel):
 
         # print("Time : {:0.3f}".format(end-start))
         print("bpp_real:",bpp_real)
-        delta_time = end-start
-        print("enc-time",delta_time)
+        delta_time = end - start
+        print("enc-time", delta_time)
+
         return {
             'bpp_real': bpp_real,
             'time':None,
@@ -1338,7 +1339,6 @@ class DSIC(CompressionModel):
         end = time.time()
         delta_time = end - start
         print("enc-time", delta_time)
-
         return {
             'x1_hat':x1_hat,
             'x2_hat':x2_hat,

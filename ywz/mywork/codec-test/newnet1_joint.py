@@ -1,5 +1,7 @@
 # 正常版 newnet1.py
-# cvpr-HESIC -已实现codec -codec测试于test2_codec.py
+# cvpr-HESIC+ -已实现codec -codec测试于test2_codec.py
+
+#python newtrain1_joint.py -d "/home/sharklet/database/aftercut512"  --seed 0 --cuda 0 --patch-size 512 512 --batch-size 9 --test-batch-size 1  --save --lambda 0.01 --learning-rate 5e-5
 
 import argparse
 import math
@@ -7,7 +9,7 @@ import random
 import shutil
 import os
 import sys
-import numpy as np
+
 import math
 
 #在这里改GMM计算方式
@@ -29,9 +31,14 @@ from compressai.layers import GDN
 from compressai.models import CompressionModel
 from compressai.models.utils import conv, deconv
 from PIL import Image
+import numpy as np
+
 import time
 from range_coder import RangeEncoder, RangeDecoder, prob_to_cum_freq
 from compressai.layers import *
+
+import torch.nn.functional as F
+
 
 class CompressionModel(nn.Module):
     """Base class for constructing an auto-encoder with at least one entropy
@@ -143,6 +150,7 @@ class AverageMeter:
         self.count += n
         self.avg = self.sum / self.count
 
+
 # ##########################################################
 # #y1_hat 生成global_context
 # class global_context(nn.Module):
@@ -242,33 +250,6 @@ class AverageMeter:
 #         #softmax over dispartiy dimenstion (C is disparity maxnum)
 #         self.cost = nn.functional.softmax(self.all_out,dim=-3)
 #         return self.cost
-
-##
-#质量增强
-# ResidualBlock  compressai/layers/layers.py
-# class ResidualBlock(nn.Module):
-#     """Simple residual block with two 3x3 convolutions.
-#
-#     Args:
-#         in_ch (int): number of input channels
-#         out_ch (int): number of output channels
-#     """
-#     def __init__(self, in_ch, out_ch):
-#         super().__init__()
-#         self.conv1 = conv3x3(in_ch, out_ch)
-#         self.leaky_relu = nn.LeakyReLU(inplace=True)
-#         self.conv2 = conv3x3(out_ch, out_ch)
-#
-#     def forward(self, x):
-#         identity = x
-#
-#         out = self.conv1(x)
-#         out = self.leaky_relu(out)
-#         out = self.conv2(out)
-#         out = self.leaky_relu(out)
-#
-#         out = out + identity
-#         return out
 class Enhancement_Block(nn.Module):
     def __init__(self):
         super().__init__()
@@ -309,107 +290,6 @@ class Enhancement(nn.Module):
 
         out = out + identity
         return out
-
-
-# ##########################################################
-# #y1_hat 生成global_context
-# class global_context(nn.Module):
-#     def __init__(self,M,F,C):
-#         super().__init__()
-#         self.F = F
-#         self.F0 = F//3
-#         self.M = M
-#         self.C = C
-#         # 定义新网络 global_context (输入y1)
-#         self.global_net = nn.Sequential(
-#             # nn.Conv2d(M,(F*C),kernel_size=5,stride=1,padding=kernel_size // 2) 等价于下行
-#             conv(M, F * C, kernel_size=5, stride=1),  # padding = kernel_size // 2
-#             nn.GroupNorm(num_channels=F * C, num_groups=F),
-#             nn.ReLU(),
-#
-#             conv(F * C, F * C, kernel_size=5, stride=1),  # padding = kernel_size // 2
-#             nn.GroupNorm(num_channels=F * C, num_groups=F),
-#             nn.ReLU(),
-#
-#             conv(F * C, F * C, kernel_size=5, stride=1),  # padding = kernel_size // 2
-#             nn.GroupNorm(num_channels=F * C, num_groups=F),
-#             nn.ReLU(),
-#
-#             conv(F * C, F * C, kernel_size=5, stride=1),  # padding = kernel_size // 2
-#         )
-#
-#     def forward(self,y1):
-#         temp_y1 = self.global_net(y1)
-#         #batch_size
-#         temp3d = torch.reshape(temp_y1, (-1,3, self.F0, self.C, temp_y1.size()[-2], temp_y1.size()[-1])) #增加batch维度
-#         #reshape to 3d
-#         return temp3d.split(1,dim=1)  # aa,bb,cc [batch,1,7 , 32,64,48]  F0为3d版的通道 需要进行Conv3d 出来是个tuple(3) 每个维度是[batch,1,F0,C,H/xx,W/xx]
-#
-# #生成cost_volume
-# class cost_volume(nn.Module):
-#     #输出维度为[1,C,H/xx,W/xx] 作为cost volume
-#     def __init__(self,N,scale_factor,F,C): #N=input_channels,scale_factor:Upsample_factor,
-#         super(cost_volume, self).__init__()
-#         self.N = N
-#         self.scale_factor = scale_factor
-#         self.F = F
-#         self.F0 = F // 3
-#         self.C = C
-#
-#         self.model1 = nn.Sequential(
-#             conv(2*self.N,self.N,kernel_size=5,stride=1),
-#             nn.GroupNorm(num_channels=self.N,num_groups=4),
-#             nn.ReLU(),
-#
-#             conv(self.N, self.N, kernel_size=5, stride=1),
-#             nn.GroupNorm(num_channels=self.N, num_groups=4),
-#             nn.ReLU(),
-#         )
-#
-#         self.upsample_layer = nn.UpsamplingBilinear2d(scale_factor=self.scale_factor)
-#         self.model2 = nn.Sequential(
-#             #先取 tensor[0]需要4维的 之后再恢复5维，输入到model2里来 #or:torch.squeeze(x)  torch.unsqueeze(x,dim=0)
-#             # nn.UpsamplingBilinear2d(scale_factor=scale_factor),
-#             nn.Conv3d(in_channels=self.F0, out_channels=self.F0, kernel_size=5, stride=1, padding=5 // 2),
-#             nn.GroupNorm(num_channels=self.F0, num_groups=1),
-#             nn.ReLU(),
-#
-#             nn.Conv3d(in_channels=self.F0, out_channels=self.F0, kernel_size=5, stride=1, padding=5 // 2),
-#             nn.GroupNorm(num_channels=self.F0, num_groups=1),
-#             nn.ReLU(),
-#             #输出后记得先转2d再concat
-#         )
-#
-#         self.model3 = nn.Sequential(
-#             conv((self.F0 * self.C + self.N), self.N, kernel_size=5, stride=1),
-#             nn.GroupNorm(num_channels=self.N, num_groups=4),
-#             nn.ReLU(),
-#
-#             conv(self.N, self.N, kernel_size=5, stride=1),
-#             nn.GroupNorm(num_channels=self.N, num_groups=4),
-#             nn.ReLU(),
-#
-#             #最后变成C通道，即为disparity
-#             conv(self.N, self.C, kernel_size=5, stride=1),
-#             #softmax over dispartiy dimenstion (C is disparity maxnum)
-#             # nn.functional.softmax(dim=-3),
-#         )
-#
-#     def forward(self,h1,h2,d):
-#         self.h_in = torch.cat((h1,h2),dim=1)
-#         self.h_out = self.model1(self.h_in)
-#         #d取输出的tuple其中一个， 然后  [batch_size,1,F0,C,H/xx,W/xx]
-#         self.d_in = torch.reshape(d,(-1,d.size()[-3],d.size()[-2],d.size()[-1]))#[batch_size*F0,C,H/xx,W/xx]
-#         self.d_up = self.upsample_layer(self.d_in) #[batch_size*F0,C,H/xx,W/xx]
-#         self.d_up_3d = torch.reshape(self.d_up,(-1,self.F0,self.C,self.d_up.size()[-2],self.d_up.size()[-1]))   #[batch,F0,C,H/xx,W/xx]
-#         self.d_out_3d = self.model2(self.d_up_3d) #[batch,F0,C,H/xx,W/xx]
-#         self.d_out = torch.reshape(self.d_out_3d,(-1,self.F0*self.C,self.d_out_3d.size()[-2],self.d_out_3d.size()[-1])) #[batch,F0*C,H/xx,W/xx]
-#         #all
-#         self.all_in = torch.cat((self.h_out,self.d_out),dim=1) #在channel维进行concat
-#         self.all_out = self.model3(self.all_in)
-#         #softmax over dispartiy dimenstion (C is disparity maxnum)
-#         self.cost = nn.functional.softmax(self.all_out,dim=-3)
-#         return self.cost
 
 
 
@@ -693,6 +573,14 @@ class Decoder2(nn.Module):
 
 
 ###########################################################################
+# From Balle's tensorflow compression examples
+SCALES_MIN = 0.11
+SCALES_MAX = 256
+SCALES_LEVELS = 64
+
+
+def get_scale_table(min=SCALES_MIN, max=SCALES_MAX, levels=SCALES_LEVELS):  # pylint: disable=W0622
+    return torch.exp(torch.linspace(math.log(min), math.log(max), levels))
 
 
 class HSIC(CompressionModel):
@@ -714,30 +602,100 @@ class HSIC(CompressionModel):
         # pic2 需要的组件
 
 
-        #hyper
-        self._h_a1 = encode_hyper(N=N,M=M)
-        self._h_a2 = encode_hyper(N=N,M=M)
-        self._h_s1 = gmm_hyper_y1(N=N,M=M,K=K)
-        self._h_s2 = gmm_hyper_y2(N=N,M=M,K=K)
+        # #hyper
+        # self._h_a1 = encode_hyper(N=N,M=M)
+        # self._h_a2 = encode_hyper(N=N,M=M)
+        # self._h_s1 = gmm_hyper_y1(N=N,M=M,K=K)
+        # self._h_s2 = gmm_hyper_y2(N=N,M=M,K=K)
+######################################################################
+        self.h_a1 = nn.Sequential(
+            conv(M, N, stride=1, kernel_size=3),
+            nn.LeakyReLU(inplace=True),
+            conv(N, N, stride=2, kernel_size=5),
+            nn.LeakyReLU(inplace=True),
+            conv(N, N, stride=2, kernel_size=5),
+        )
 
-        # self.need_int = need_int
+        self.h_s1 = nn.Sequential(
+            deconv(N, M, stride=2, kernel_size=5),
+            nn.LeakyReLU(inplace=True),
+            deconv(M, M * 3 // 2, stride=2, kernel_size=5),
+            nn.LeakyReLU(inplace=True),
+            conv(M * 3 // 2, M * 2, stride=1, kernel_size=3),
+        )
+
+        self.entropy_parameters1 = nn.Sequential(
+            nn.Conv2d(M * 12 // 3, M * 10 // 3, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(M * 10 // 3, M * 8 // 3, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(M * 8 // 3, M * 6 // 3, 1),
+        )
+
+        self.context_prediction1 = MaskedConv2d(M,
+                                               2 * M,
+                                               kernel_size=5,
+                                               padding=2,
+                                               stride=1)
+
+        self.gaussian_conditional1 = GaussianConditional(None)
+
+        self.h_a2 = nn.Sequential(
+            conv(M, N, stride=1, kernel_size=3),
+            nn.LeakyReLU(inplace=True),
+            conv(N, N, stride=2, kernel_size=5),
+            nn.LeakyReLU(inplace=True),
+            conv(N, N, stride=2, kernel_size=5),
+        )
+
+        self.h_s2 = nn.Sequential(
+            deconv(N, M, stride=2, kernel_size=5),
+            nn.LeakyReLU(inplace=True),
+            deconv(M, M * 3 // 2, stride=2, kernel_size=5),
+            nn.LeakyReLU(inplace=True),
+            conv(M * 3 // 2, M * 2, stride=1, kernel_size=3),
+        )
+
+        self.entropy_parameters2 = nn.Sequential(
+            nn.Conv2d(M * 18 // 3, M * 10 // 3, 1), # (M * 12 // 3, M * 10 // 3, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(M * 10 // 3, M * 8 // 3, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(M * 8 // 3, M * 6 // 3, 1),
+        )
+
+        self.context_prediction2 = MaskedConv2d(M,
+                                               2 * M,
+                                               kernel_size=5,
+                                               padding=2,
+                                               stride=1)
+
+        self.gaussian_conditional2 = GaussianConditional(None)
+
     def forward(self,x1,x2,h_matrix):
         #定义结构
         y1,g1_1,g1_2,g1_3 = self.encoder1(x1)
-        z1 = self._h_a1(y1)
+        z1 = self.h_a1(y1)
         #print(z1.device)
         z1_hat,z1_likelihoods = self.entropy_bottleneck1(z1)
-        gmm1 = self._h_s1(z1_hat) #三要素
-        y1_hat, y1_likelihoods = self.gaussian1(y1, gmm1[0],gmm1[1],gmm1[2])  # sigma
 
-        # #save
-        # save_y1_hat = y1_hat.cpu().numpy()
-        # data = {"y1_hat":save_y1_hat}
-        # np.save('y1_hat.npy',data)
-        #
-        # raise ValueError("stop")
-        # #end save
+        #change:
+        params1 = self.h_s1(z1_hat)
+        y1_hat = self.gaussian_conditional1._quantize(  # pylint: disable=protected-access
+            y1, 'noise' if self.training else 'dequantize')
+        ctx_params1 = self.context_prediction1(y1_hat)  #用两次！！ 2M
+        gaussian_params1 = self.entropy_parameters1(
+            torch.cat((params1, ctx_params1), dim=1))
+        scales_hat1, means_hat1 = gaussian_params1.chunk(2, 1)
+        _, y1_likelihoods = self.gaussian_conditional1(y1,
+                                                     scales_hat1,
+                                                     means=means_hat1)
 
+        # gmm1 = self._h_s1(z1_hat) #三要素
+
+
+
+        # y1_hat, y1_likelihoods = self.gaussian1(y1, gmm1[0],gmm1[1],gmm1[2])  # sigma
 
         x1_hat,g1_4,g1_5,g1_6 = self.decoder1(y1_hat)
 
@@ -748,20 +706,27 @@ class HSIC(CompressionModel):
         ##end encoder
 
         # hyper for pic2
-
-        # change仍使用左目codec通道编x1_warp
-        x1_warp_aftercodec = kornia.warp_perspective(x1_hat, h_matrix, (x1.size()[-2], x1.size()[-1]))
-        y1_warpf2, _, _, _ = self.encoder1(x1_warp_aftercodec)
-        y1_hat_warpf2 = self.gaussian1._quantize(  # pylint: disable=protected-access
-            y1_warpf2, 'noise' if self.training else 'dequantize')
-        ##
-
-        z2 = self._h_a2(y2)
+        z2 = self.h_a2(y2)
         z2_hat, z2_likelihoods = self.entropy_bottleneck2(z2)
-        gmm2 = self._h_s2(z2_hat, y1_hat_warpf2)  # 三要素
 
-        y2_hat, y2_likelihoods = self.gaussian2(y2, gmm2[0], gmm2[1], gmm2[2])  # 这里也是临时，待改gmm
+        #change
+        params2 = self.h_s2(z2_hat)
+        y2_hat = self.gaussian_conditional2._quantize(  # pylint: disable=protected-access
+            y2, 'noise' if self.training else 'dequantize')
+        ctx_params2 = self.context_prediction2(y2_hat)
+        gaussian_params2 = self.entropy_parameters2(
+            torch.cat((params2, ctx_params2, ctx_params1), dim=1))
+        scales_hat2, means_hat2 = gaussian_params2.chunk(2, 1)
+        _, y2_likelihoods = self.gaussian_conditional1(y2,
+                                                       scales_hat2,
+                                                       means=means_hat2)
+
+        # gmm2 = self._h_s2(z2_hat, y1_hat)  # 三要素
+
+        # y2_hat, y2_likelihoods = self.gaussian2(y2, gmm2[0], gmm2[1], gmm2[2])  # 这里也是临时，待改gmm
         # end hyper for pic2
+
+
 
         ##decoder
         x1_hat_warp = kornia.warp_perspective(x1_hat, h_matrix, (x1_hat.size()[-2],x1_hat.size()[-1]))
@@ -823,14 +788,21 @@ class HSIC(CompressionModel):
     def compress(self, x1, x2, h_matrix, output_name, output_path="", device="cpu"):
         # 定义结构
         y1, g1_1, g1_2, g1_3 = self.encoder1(x1)
-        z1 = self._h_a1(y1)
+        z1 = self.h_a1(y1)
         # print(z1.device)
         # z1_hat, z1_likelihoods = self.entropy_bottleneck1(z1)
         z1_strings = self.entropy_bottleneck1.compress(z1)
         z1_hat = self.entropy_bottleneck1.decompress(z1_strings, z1.size()[-2:])  # z解码后结果（压缩时仍需要）
-        gmm1 = self._h_s1(z1_hat)  # 三要素
-        # y1_hat, y1_likelihoods = self.gaussian1(y1, gmm1[0], gmm1[1], gmm1[2])  # sigma
+
+        params1 = self.h_s1(z1_hat)
         y1_hat = self._quantize(y1, 'dequantize', means=None)
+        # ctx_params1 = self.context_prediction1(y1_hat)  # 用两次！！ 2M
+        # gaussian_params1 = self.entropy_parameters1(
+        #     torch.cat((params1, ctx_params1), dim=1))
+        # scales_hat1, means_hat1 = gaussian_params1.chunk(2, 1)
+
+        # gmm1 = self._h_s1(z1_hat)  # 三要素
+        # y1_hat, y1_likelihoods = self.gaussian1(y1, gmm1[0], gmm1[1], gmm1[2])  # sigma
 
         # #save
         # save_y1_hat = y1_hat.cpu().numpy()
@@ -840,8 +812,7 @@ class HSIC(CompressionModel):
         # raise ValueError("stop")
         # #end save
 
-        x1_hat, g1_4, g1_5, g1_6 = self.decoder1(y1_hat)
-
+        x1_hat,g1_4,g1_5,g1_6 = self.decoder1(y1_hat)
         #############################################
         # encoder
         x1_warp = kornia.warp_perspective(x1, h_matrix, (x1.size()[-2], x1.size()[-1]))
@@ -849,21 +820,22 @@ class HSIC(CompressionModel):
         ##end encoder
 
         # hyper for pic2
-        z2 = self._h_a2(y2)
+        z2 = self.h_a2(y2)
         # z2_hat, z2_likelihoods = self.entropy_bottleneck2(z2)
         z2_strings = self.entropy_bottleneck2.compress(z2)
         z2_hat = self.entropy_bottleneck2.decompress(z2_strings, z2.size()[-2:])  # z解码后结果（压缩时仍需要）
 
-        ##twiceLeft
-        x1_warp_aftercodec = kornia.warp_perspective(x1_hat, h_matrix, (x1.size()[-2], x1.size()[-1]))
-        y1_warpf2, _, _, _ = self.encoder1(x1_warp_aftercodec)
-        y1_hat_warpf2 = self.gaussian1._quantize(  # pylint: disable=protected-access
-            y1_warpf2, 'noise' if self.training else 'dequantize')
-
-        gmm2 = self._h_s2(z2_hat, y1_hat_warpf2)  # 三要素
+        # gmm2 = self._h_s2(z2_hat, y1_hat)  # 三要素
+        params2 = self.h_s2(z2_hat)
+        y2_hat = self.gaussian_conditional2._quantize(  # pylint: disable=protected-access
+            y2, 'noise' if self.training else 'dequantize')
+        # ctx_params2 = self.context_prediction2(y2_hat)
+        # gaussian_params2 = self.entropy_parameters2(
+        #     torch.cat((params2, ctx_params2, ctx_params1), dim=1))
+        # scales_hat2, means_hat2 = gaussian_params2.chunk(2, 1)
 
         # y2_hat, y2_likelihoods = self.gaussian2(y2, gmm2[0], gmm2[1], gmm2[2])  # 这里也是临时，待改gmm
-        y2_hat = self._quantize(y2, 'dequantize', means=None)
+        # y2_hat = self._quantize(y2, 'dequantize', means=None)
         # end hyper for pic2
 
         ##encoding
@@ -917,56 +889,70 @@ class HSIC(CompressionModel):
         samples2_np = np.arange(0, minmax2 * 2 + 1)
 
         start = time.time()
+        kernel_size = 5  # context prediction kernel size
+        padding = (kernel_size - 1) // 2
+        y1_hat = F.pad(y1_hat, (padding, padding, padding, padding))
+        y2_hat = F.pad(y2_hat, (padding, padding, padding, padding))
         # y1
-        # for h_idx in range(y2_hat_cpu_np.shape[2]):
-        #     for w_idx in range(y2_hat_cpu_np.shape[3]):
         # 如果是joint一类，在此计算当前像素点的概率
-        for i in range(len(non_zero_idx_1)):
-            samples1 = torch.Tensor(samples1_np).to('cuda:0')
-            samples1 = samples1.reshape([samples1.shape[0], 1, 1])
-            samples1 = samples1.expand(samples1.shape[0], y1_hat_cpu_np.shape[2],
-                                       y1_hat_cpu_np.shape[3])  # [arange(xx),width,height]
-            # 非零通道：一个通道算一次-> 并行优化
-            ch_idx = non_zero_idx_1[i]  # 非零通道
+        for h_idx in range(y1_hat_cpu_np.shape[2]):
+            for w_idx in range(y1_hat_cpu_np.shape[3]):
+                #计算mask cnn  #逐像素计算
+                y1_crop = y1_hat[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
+                ctx_params1 = self.context_prediction1(y1_crop)
+                ctx_p1 = ctx_params1[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
+                p1 = params1[0:0 + 1, :, h_idx:h_idx + 1, w_idx:w_idx + 1]
+                gaussian_params1 = self.entropy_parameters1(torch.cat((p1, ctx_p1), dim=1))
+                scales_hat1, means_hat1 = gaussian_params1.chunk(2, 1)
 
-            # gmm1 = [scales, means,weights] 通道数均为M*K
-            ch_idx_list = [ch_idx + temp_i * self.M for temp_i in range(self.K)]
-            sigma1 = gmm1[0][0, ch_idx_list, :, :]
-            means1 = gmm1[1][0, ch_idx_list, :, :] + minmax1  # 注意这里~~~ 相当于平移
-            weights1 = gmm1[2][0, ch_idx_list, :, :]  # (M*k):((k+1)*M) #1x1
-            # torch.Size([5])
-            # print(sigma1.shape)
-            # print(means1.shape)
-            # print(weights1.shape)
+                for i in range(len(non_zero_idx_1)):
+                    samples1 = torch.Tensor(samples1_np).to('cuda:0')
+                    samples1 = samples1.reshape([samples1.shape[0], 1, 1])
+                    samples1 = samples1.expand(samples1.shape[0], y1_hat_cpu_np.shape[2],
+                                               y1_hat_cpu_np.shape[3])  # [arange(xx),width,height]
+                    # 非零通道：一个通道算一次-> 并行优化
+                    ch_idx = non_zero_idx_1[i]  # 非零通道
 
-            # 计算pmf
-            pmf = None
-            for temp_K in range(self.K):
-                half = float(0.5)
+                    # gmm1 = [scales, means,weights] 通道数均为M*K
+                    # ch_idx_list = [ch_idx + temp_i * self.M for temp_i in range(self.K)]
+                    # print("compress-scales_hat1")
+                    # print(scales_hat1.shape)
 
-                values = samples1 - means1[temp_K]
+                    sigma1 = scales_hat1[0, ch_idx]
+                    means1 = means_hat1[0, ch_idx] + minmax1  # 注意这里~~~ 相当于平移
+                    # weights1 = gmm1[2][0, ch_idx_list, :, :]  # (M*k):((k+1)*M) #1x1
+                    # torch.Size([5])
+                    # print(sigma1.shape)
+                    # print(means1.shape)
+                    # print(weights1.shape)
 
-                temp_scales = self.gaussian1.lower_bound_scale(
-                    sigma1[temp_K])  # scales是方差，所以下方在标准正态基础上，直接/scales，起到方差作用
+                    # 计算pmf
+                    pmf = None
+                    # for temp_K in range(self.K):
+                    half = float(0.5)
 
-                values = abs(values)
-                upper = self._standardized_cumulative((half - values) / temp_scales)
-                lower = self._standardized_cumulative((-half - values) / temp_scales)
-                if pmf == None:
-                    pmf = (upper - lower) * weights1[temp_K]  # 指定对应的M个通道
-                else:
-                    pmf += (upper - lower) * weights1[temp_K]  # 指定对应的M个通道
+                    values = samples1 - means1#[temp_K]
 
-            # print(pmf.shape)
-            # raise ValueError("stop")
-            # print("minmax1",minmax1)
+                    temp_scales = self.gaussian1.lower_bound_scale(
+                        sigma1)  # scales是方差，所以下方在标准正态基础上，直接/scales，起到方差作用
 
-            pmf = pmf.cpu().numpy()
-            # print(pmf.shape)
-            # raise ValueError("stop")
+                    values = abs(values)
+                    upper = self._standardized_cumulative((half - values) / temp_scales)
+                    lower = self._standardized_cumulative((-half - values) / temp_scales)
+                    if pmf == None:
+                        pmf = (upper - lower) #* weights1[temp_K]  # 指定对应的M个通道
+                    else:
+                        pmf += (upper - lower) #* weights1[temp_K]  # 指定对应的M个通道
 
-            for h_idx in range(y1_hat_cpu_np.shape[2]):
-                for w_idx in range(y1_hat_cpu_np.shape[3]):
+                    # print(pmf.shape)
+                    # raise ValueError("stop")
+                    # print("minmax1",minmax1)
+
+                    pmf = pmf.cpu().numpy()
+                    # print(pmf.shape)
+                    # raise ValueError("stop")
+
+                    #取消缩进 joint
                     pmf_temp = pmf[:, h_idx, w_idx]
                     # print(pmf_temp.shape)
                     # raise ValueError("stop")
@@ -977,7 +963,7 @@ class HSIC(CompressionModel):
                     cdf = list(np.add.accumulate(pmf_clip))
                     cdf = [0] + [int(i) for i in cdf]
 
-                    symbol = np.int(y1_hat[0, ch_idx, h_idx, w_idx] + minmax1)
+                    symbol = np.int(y1_hat[0, ch_idx, h_idx+ padding, w_idx+ padding] + minmax1)
                     # print("len-cdf",len(cdf))
                     # raise ValueError("stop")
                     encoder.encode([symbol], cdf)
@@ -986,44 +972,60 @@ class HSIC(CompressionModel):
 
         # y2
 
-        # for h_idx in range(y2_hat_cpu_np.shape[2]):
-        #     for w_idx in range(y2_hat_cpu_np.shape[3]):
-        # 如果是joint一类，在此计算当前像素点的概率
-        for i in range(len(non_zero_idx_2)):
-            samples2 = torch.Tensor(samples2_np).to('cuda:0')
-            samples2 = samples2.reshape([samples2.shape[0], 1, 1])
-            samples2 = samples2.expand(samples2.shape[0], y2_hat_cpu_np.shape[2],
-                                       y2_hat_cpu_np.shape[3])  # [arange(xx),width,height]
-            # 非零通道：一个通道算一次-> 并行优化
-            ch_idx = non_zero_idx_2[i]  # 非零通道
+        for h_idx in range(y2_hat_cpu_np.shape[2]):
+            for w_idx in range(y2_hat_cpu_np.shape[3]):
+                # ctx_params2 = self.context_prediction2(y2_hat)
+                # gaussian_params2 = self.entropy_parameters2(
+                #     torch.cat((params2, ctx_params2, ctx_params1), dim=1))
+                # scales_hat2, means_hat2 = gaussian_params2.chunk(2, 1)
+                # 如果是joint一类，在此计算当前像素点的概率
+                # 计算mask cnn  #逐像素计算
+                y1_crop = y1_hat[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
+                ctx_params1 = self.context_prediction1(y1_crop)
+                ctx_p1 = ctx_params1[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
 
-            # gmm2 = [scales, means,weights] 通道数均为M*K
-            ch_idx_list = [ch_idx + temp_i * self.M for temp_i in range(self.K)]
-            sigma2 = gmm2[0][0, ch_idx_list, :, :]
-            means2 = gmm2[1][0, ch_idx_list, :, :] + minmax2  # 注意这里~~~ 相当于平移
-            weights2 = gmm2[2][0, ch_idx_list, :, :]  # (M*k):((k+1)*M) #1x1
+                y2_crop = y2_hat[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
+                ctx_params2 = self.context_prediction2(y2_crop)
+                ctx_p2 = ctx_params2[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
 
-            # 计算pmf
-            pmf = None
-            for temp_K in range(self.K):
-                half = float(0.5)
+                p2 = params2[0:0 + 1, :, h_idx:h_idx + 1, w_idx:w_idx + 1]
+                gaussian_params2 = self.entropy_parameters2(torch.cat((p2, ctx_p2,ctx_p1), dim=1))
+                scales_hat2, means_hat2 = gaussian_params2.chunk(2, 1)
 
-                values = samples2 - means2[temp_K]
+                for i in range(len(non_zero_idx_2)):
+                    samples2 = torch.Tensor(samples2_np).to('cuda:0')
+                    samples2 = samples2.reshape([samples2.shape[0], 1, 1])
+                    samples2 = samples2.expand(samples2.shape[0], y2_hat_cpu_np.shape[2],
+                                               y2_hat_cpu_np.shape[3])  # [arange(xx),width,height]
+                    # 非零通道：一个通道算一次-> 并行优化
+                    ch_idx = non_zero_idx_2[i]  # 非零通道
 
-                temp_scales = self.gaussian2.lower_bound_scale(
-                    sigma2[temp_K])  # scales是方差，所以下方在标准正态基础上，直接/scales，起到方差作用
+                    # gmm2 = [scales, means,weights] 通道数均为M*K
+                    # ch_idx_list = [ch_idx + temp_i * self.M for temp_i in range(self.K)]
+                    sigma2 = scales_hat2[0, ch_idx]
+                    means2 = means_hat2[0, ch_idx] + minmax2  # 注意这里~~~ 相当于平移
+                    # weights2 = gmm2[2][0, ch_idx_list, :, :]  # (M*k):((k+1)*M) #1x1
 
-                values = abs(values)
-                upper = self._standardized_cumulative((half - values) / temp_scales)
-                lower = self._standardized_cumulative((-half - values) / temp_scales)
-                if pmf == None:
-                    pmf = (upper - lower) * weights2[temp_K]  # 指定对应的M个通道
-                else:
-                    pmf += (upper - lower) * weights2[temp_K]  # 指定对应的M个通道
-            pmf = pmf.cpu().numpy()
+                    # 计算pmf
+                    pmf = None
+                    # for temp_K in range(self.K):
+                    half = float(0.5)
 
-            for h_idx in range(y2_hat_cpu_np.shape[2]):
-                for w_idx in range(y2_hat_cpu_np.shape[3]):
+                    values = samples2 - means2 #[temp_K]
+
+                    temp_scales = self.gaussian2.lower_bound_scale(
+                        sigma2)  # scales是方差，所以下方在标准正态基础上，直接/scales，起到方差作用
+
+                    values = abs(values)
+                    upper = self._standardized_cumulative((half - values) / temp_scales)
+                    lower = self._standardized_cumulative((-half - values) / temp_scales)
+                    if pmf == None:
+                        pmf = (upper - lower) #* weights2[temp_K]  # 指定对应的M个通道
+                    else:
+                        pmf += (upper - lower) #* weights2[temp_K]  # 指定对应的M个通道
+                    pmf = pmf.cpu().numpy()
+
+                    #取消缩进
                     pmf_temp = pmf[:, h_idx, w_idx]
                     # print(pmf_temp.shape)
                     # raise ValueError("stop")
@@ -1034,7 +1036,7 @@ class HSIC(CompressionModel):
                     cdf = list(np.add.accumulate(pmf_clip))
                     cdf = [0] + [int(i) for i in cdf]
 
-                    symbol = np.int(y2_hat[0, ch_idx, h_idx, w_idx] + minmax2)
+                    symbol = np.int(y2_hat[0, ch_idx, h_idx+ padding, w_idx+ padding] + minmax2)
                     # print("len-cdf",len(cdf))
                     # raise ValueError("stop")
                     encoder.encode([symbol], cdf)
@@ -1102,7 +1104,9 @@ class HSIC(CompressionModel):
         z1_hat = self.entropy_bottleneck1.decompress([string1], z_shape)  # z解码后结果
         z2_hat = self.entropy_bottleneck2.decompress([string2], z_shape)  # z解码后结果
 
-        gmm1 = self._h_s1(z1_hat)  # 三要素
+        # 接次级解码
+        params1 = self.h_s1(z1_hat)
+        params2 = self.h_s2(z2_hat)
         # ===================decoding for y1 and y2
         # 逐像素计算概率分布、进行熵编码->后续考虑加入joint 进一步提高
         output2 = os.path.join(output_path, str(output_name) + '.bin')
@@ -1113,61 +1117,77 @@ class HSIC(CompressionModel):
         samples2_np = np.arange(0, minmax2 * 2 + 1)
 
         start = time.time()
+        kernel_size = 5  # context prediction kernel size
+        padding = (kernel_size - 1) // 2
+
         #
         # y1_hat = np.zeros([1] + [y_shape[1]+kernel_size-1] + [y_shape[2]+kernel_size-1] + [num_filters])
-        y1_hat = np.zeros([1] + [self.M] + [y_shape[0], y_shape[1]])  # [1,192,32,32]
-        y2_hat = np.zeros([1] + [self.M] + [y_shape[0], y_shape[1]])  # [1,192,32,32]
+        y1_hat = np.zeros([1] + [self.M] + [y_shape[0]+ 2 * padding, y_shape[1]+ 2 * padding])  # [1,192,32,32]
+        y2_hat = np.zeros([1] + [self.M] + [y_shape[0]+ 2 * padding, y_shape[1]+ 2 * padding])  # [1,192,32,32]
         y1_hat = torch.Tensor(y1_hat).to(device)
         y2_hat = torch.Tensor(y2_hat).to(device)
 
         decoder = RangeDecoder(output2)
         # y1
-        for i in range(len(non_zero_idx_1)):
-            samples1 = torch.Tensor(samples1_np).to('cuda:0')
-            samples1 = samples1.reshape([samples1.shape[0], 1, 1])
-            samples1 = samples1.expand(samples1.shape[0], y_shape[0], y_shape[1])  # [arange(xx),width,height]
-            # 非零通道：一个通道算一次-> 并行优化
-            ch_idx = non_zero_idx_1[i]  # 非零通道
+        for h_idx in range(y_shape[0]):
+            for w_idx in range(y_shape[1]):
+                #更新
+                # only perform the 5x5 convolution on a cropped tensor
+                # centered in (h, w)
+                y1_crop = y1_hat[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
+                ctx_params1 = self.context_prediction1(y1_crop)
 
-            # gmm1 = [scales, means,weights] 通道数均为M*K
-            ch_idx_list = [ch_idx + temp_i * self.M for temp_i in range(self.K)]
-            sigma1 = gmm1[0][0, ch_idx_list, :, :]
-            means1 = gmm1[1][0, ch_idx_list, :, :] + minmax1  # 注意这里~~~ 相当于平移
-            weights1 = gmm1[2][0, ch_idx_list, 0, 0]  # (M*k):((k+1)*M) #1x1
-            # torch.Size([5])
-            # print(sigma1.shape)
-            # print(means1.shape)
-            # print(weights1.shape)
+                # 1x1 conv for the entropy parameters prediction network, so
+                # we only keep the elements in the "center"
+                ctx_p1 = ctx_params1[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
+                p1 = params1[0:0 + 1, :, h_idx:h_idx + 1, w_idx:w_idx + 1]
+                gaussian_params1 = self.entropy_parameters1(torch.cat((p1, ctx_p1), dim=1))
+                scales_hat1, means_hat1 = gaussian_params1.chunk(2, 1)
 
-            # 计算pmf
-            pmf = None
-            for temp_K in range(self.K):
-                half = float(0.5)
+                for i in range(len(non_zero_idx_1)):
+                    samples1 = torch.Tensor(samples1_np).to('cuda:0')
+                    samples1 = samples1.reshape([samples1.shape[0], 1, 1])
+                    samples1 = samples1.expand(samples1.shape[0], y_shape[0], y_shape[1])  # [arange(xx),width,height]
+                    # 非零通道：一个通道算一次-> 并行优化
+                    ch_idx = non_zero_idx_1[i]  # 非零通道
 
-                values = samples1 - means1[temp_K]
+                    # gmm1 = [scales, means,weights] 通道数均为M*K
+                    # ch_idx_list = [ch_idx + temp_i * self.M for temp_i in range(self.K)]
+                    sigma1 = scales_hat1[0, ch_idx]
+                    means1 = means_hat1[0, ch_idx] + minmax1  # 注意这里~~~ 相当于平移
+                    # weights1 = gmm1[2][0, ch_idx_list, 0, 0]  # (M*k):((k+1)*M) #1x1
+                    # torch.Size([5])
+                    # print(sigma1.shape)
+                    # print(means1.shape)
+                    # print(weights1.shape)
 
-                temp_scales = self.gaussian1.lower_bound_scale(
-                    sigma1[temp_K])  # scales是方差，所以下方在标准正态基础上，直接/scales，起到方差作用
+                    # 计算pmf
+                    pmf = None
+                    # for temp_K in range(self.K):
+                    half = float(0.5)
 
-                values = abs(values)
-                upper = self._standardized_cumulative((half - values) / temp_scales)
-                lower = self._standardized_cumulative((-half - values) / temp_scales)
-                if pmf == None:
-                    pmf = (upper - lower) * weights1[temp_K]  # 指定对应的M个通道
-                else:
-                    pmf += (upper - lower) * weights1[temp_K]  # 指定对应的M个通道
+                    values = samples1 - means1#[temp_K]
 
-            # print(pmf.shape)
-            # raise ValueError("stop")
-            # print("minmax1",minmax1)
+                    temp_scales = self.gaussian1.lower_bound_scale(
+                        sigma1)  # scales是方差，所以下方在标准正态基础上，直接/scales，起到方差作用
 
-            pmf = pmf.cpu().numpy()
-            # print(pmf.shape)
-            # raise ValueError("stop1")
+                    values = abs(values)
+                    upper = self._standardized_cumulative((half - values) / temp_scales)
+                    lower = self._standardized_cumulative((-half - values) / temp_scales)
+                    if pmf == None:
+                        pmf = (upper - lower) #* weights1[temp_K]  # 指定对应的M个通道
+                    else:
+                        pmf += (upper - lower) #* weights1[temp_K]  # 指定对应的M个通道
 
-            # 逐像素解码--这个顺序应不影响joint的结果
-            for h_idx in range(y_shape[0]):
-                for w_idx in range(y_shape[1]):
+                    # print(pmf.shape)
+                    # raise ValueError("stop")
+                    # print("minmax1",minmax1)
+
+                    pmf = pmf.cpu().numpy()
+                    # print(pmf.shape)
+                    # raise ValueError("stop1")
+
+
                     pmf_temp = pmf[:, h_idx, w_idx]
 
                     # To avoid the zero-probability
@@ -1176,71 +1196,81 @@ class HSIC(CompressionModel):
                     cdf = list(np.add.accumulate(pmf_clip))
                     cdf = [0] + [int(i) for i in cdf]
 
-                    y1_hat[0, ch_idx, h_idx, w_idx] = decoder.decode(1, cdf)[0] - minmax1
+                    y1_hat[0, ch_idx, h_idx + padding:h_idx + padding + 1, w_idx + padding:w_idx + padding + 1] = decoder.decode(1, cdf)[0] - minmax1
 
                     # print(y1_hat.shape)
-        # y1_hat = torch.Tensor(y1_hat).to(device)
+        y1_hat = y1_hat[:, :, padding:-padding, padding:-padding]
         # end y1
 
         # decoding for x1 and gmm2
         x1_hat,g1_4,g1_5,g1_6 = self.decoder1(y1_hat)
 
-        ##twiceLeft
-        x1_warp_aftercodec = kornia.warp_perspective(x1_hat, h_matrix, (x1.size()[-2], x1.size()[-1]))
-        y1_warpf2, _, _, _ = self.encoder1(x1_warp_aftercodec)
-        y1_hat_warpf2 = self.gaussian1._quantize(  # pylint: disable=protected-access
-            y1_warpf2, 'noise' if self.training else 'dequantize')
-
-        gmm2 = self._h_s2(z2_hat, y1_hat_warpf2)  # 三要素
-
-
         # y2
-        for i in range(len(non_zero_idx_2)):
-            samples2 = torch.Tensor(samples2_np).to('cuda:0')
-            samples2 = samples2.reshape([samples2.shape[0], 1, 1])
-            samples2 = samples2.expand(samples2.shape[0], y_shape[0], y_shape[1])  # [arange(xx),width,height]
-            # 非零通道：一个通道算一次-> 并行优化
-            ch_idx = non_zero_idx_2[i]  # 非零通道
+        # 逐像素解码
+        y1_hat_copy = F.pad(y1_hat, (padding, padding, padding, padding))
+        for h_idx in range(y_shape[0]):
+            for w_idx in range(y_shape[1]):
+                # 更新
+                # only perform the 5x5 convolution on a cropped tensor
+                # centered in (h, w)
+                y1_crop = y1_hat_copy[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
+                ctx_params1 = self.context_prediction1(y1_crop)
+                ctx_p1 = ctx_params1[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
 
-            # gmm2 = [scales, means,weights] 通道数均为M*K
-            ch_idx_list = [ch_idx + temp_i * self.M for temp_i in range(self.K)]
-            sigma2 = gmm2[0][0, ch_idx_list, :, :]
-            means2 = gmm2[1][0, ch_idx_list, :, :] + minmax2  # 注意这里~~~ 相当于平移
-            weights2 = gmm2[2][0, ch_idx_list, 0, 0]  # (M*k):((k+1)*M) #1x1
-            # torch.Size([5])
-            # print(sigma2.shape)
-            # print(means2.shape)
-            # print(weights2.shape)
+                y2_crop = y2_hat[0:0 + 1, :, h_idx:h_idx + kernel_size, w_idx:w_idx + kernel_size]
+                ctx_params2 = self.context_prediction2(y2_crop)
+                # 1x1 conv for the entropy parameters prediction network, so
+                # we only keep the elements in the "center"
+                ctx_p2 = ctx_params2[0:0 + 1, :, padding:padding + 1, padding:padding + 1]
 
-            # 计算pmf
-            pmf = None
-            for temp_K in range(self.K):
-                half = float(0.5)
+                p2 = params2[0:0 + 1, :, h_idx:h_idx + 1, w_idx:w_idx + 1]
+                gaussian_params2 = self.entropy_parameters2(torch.cat((p2, ctx_p2,ctx_p1), dim=1))
+                scales_hat2, means_hat2 = gaussian_params2.chunk(2, 1)
 
-                values = samples2 - means2[temp_K]
+                for i in range(len(non_zero_idx_2)):
+                    samples2 = torch.Tensor(samples2_np).to('cuda:0')
+                    samples2 = samples2.reshape([samples2.shape[0], 1, 1])
+                    samples2 = samples2.expand(samples2.shape[0], y_shape[0], y_shape[1])  # [arange(xx),width,height]
+                    # 非零通道：一个通道算一次-> 并行优化
+                    ch_idx = non_zero_idx_2[i]  # 非零通道
 
-                temp_scales = self.gaussian2.lower_bound_scale(
-                    sigma2[temp_K])  # scales是方差，所以下方在标准正态基础上，直接/scales，起到方差作用
+                    # gmm2 = [scales, means,weights] 通道数均为M*K
+                    # ch_idx_list = [ch_idx + temp_i * self.M for temp_i in range(self.K)]
+                    sigma2 = scales_hat2[0, ch_idx]
+                    means2 = means_hat2[0, ch_idx] + minmax2  # 注意这里~~~ 相当于平移
+                    # weights2 = gmm2[2][0, ch_idx_list, 0, 0]  # (M*k):((k+1)*M) #1x1
+                    # torch.Size([5])
+                    # print(sigma2.shape)
+                    # print(means2.shape)
+                    # print(weights2.shape)
 
-                values = abs(values)
-                upper = self._standardized_cumulative((half - values) / temp_scales)
-                lower = self._standardized_cumulative((-half - values) / temp_scales)
-                if pmf == None:
-                    pmf = (upper - lower) * weights2[temp_K]  # 指定对应的M个通道
-                else:
-                    pmf += (upper - lower) * weights2[temp_K]  # 指定对应的M个通道
+                    # 计算pmf
+                    pmf = None
+                    # for temp_K in range(self.K):
+                    half = float(0.5)
 
-            # print(pmf.shape)
-            # raise ValueError("stop")
-            # print("minmax2",minmax2)
+                    values = samples2 - means2 #[temp_K]
 
-            pmf = pmf.cpu().numpy()
-            # print(pmf.shape)
-            # raise ValueError("stop2")
+                    temp_scales = self.gaussian2.lower_bound_scale(
+                        sigma2)  # scales是方差，所以下方在标准正态基础上，直接/scales，起到方差作用
 
-            # 逐像素解码
-            for h_idx in range(y_shape[0]):
-                for w_idx in range(y_shape[1]):
+                    values = abs(values)
+                    upper = self._standardized_cumulative((half - values) / temp_scales)
+                    lower = self._standardized_cumulative((-half - values) / temp_scales)
+                    if pmf == None:
+                        pmf = (upper - lower) #* weights2[temp_K]  # 指定对应的M个通道
+                    else:
+                        pmf += (upper - lower) #* weights2[temp_K]  # 指定对应的M个通道
+
+                    # print(pmf.shape)
+                    # raise ValueError("stop")
+                    # print("minmax2",minmax2)
+
+                    pmf = pmf.cpu().numpy()
+                    # print(pmf.shape)
+                    # raise ValueError("stop2")
+
+
                     pmf_temp = pmf[:, h_idx, w_idx]
 
                     # To avoid the zero-probability
@@ -1249,19 +1279,21 @@ class HSIC(CompressionModel):
                     cdf = list(np.add.accumulate(pmf_clip))
                     cdf = [0] + [int(i) for i in cdf]
 
-                    y2_hat[0, ch_idx, h_idx, w_idx] = decoder.decode(1, cdf)[0] - minmax2
+                    y2_hat[0, ch_idx, h_idx + padding:h_idx + padding + 1, w_idx + padding:w_idx + padding + 1] = decoder.decode(1, cdf)[0] - minmax2
 
         # print(y2_hat.shape)
+        y2_hat = y2_hat[:, :, padding:-padding, padding:-padding]
         # y2_hat = torch.Tensor(y2_hat).to(device)
         # end y2
 
         ##decoder
         x1_hat_warp = kornia.warp_perspective(x1_hat, h_matrix, (x1_hat.size()[-2], x1_hat.size()[-1]))
         x2_hat = self.decoder2(y2_hat, x1_hat_warp)
+
         decoder.close()
         end = time.time()
         delta_time = end - start
-        print("dec-time",delta_time)
+        print("dec-time", delta_time)
 
         return {
             'x1_hat': x1_hat,
@@ -1271,7 +1303,6 @@ class HSIC(CompressionModel):
             'z1_hat': z1_hat,
             'z2_hat': z2_hat,
         }
-
 
 
 
@@ -1300,24 +1331,5 @@ class Independent_EN(nn.Module):
         }
 
 
-##合体版 HESIC
-class GMM_together(nn.Module):
-    def __init__(self,N=128,M=192,K=5,**kwargs):
-        super().__init__()
-        self.m1 = HSIC(N,M,K)
-        self.m2 = Independent_EN()
-
-    def forward(self,x1,x2,h):
-        out1 = self.m1(x1,x2,h)
-        out2 = self.m2(out1['x1_hat'],out1['x2_hat'],h)
-        # out1['x1_hat'] = out2['x1_hat']
-        # out1['x2_hat'] = out2['x2_hat']
-        # return out1
-
-        return {
-            'x1_hat': out2['x1_hat'],
-            'x2_hat': out2['x2_hat'],
-            'likelihoods': out1['likelihoods'],
-        }
 
 

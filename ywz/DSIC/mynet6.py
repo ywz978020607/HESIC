@@ -1,4 +1,4 @@
-# DSIC-Net
+# try for DSIC-Net
 # cuda gpu版 mynet5:暂时可训练； mynet6: 修正bpp过高的GMM问题（归一化问题修复,z1 for y1 && z2+y1 for y2）
 import argparse
 import math
