@@ -67,7 +67,10 @@ code：qrfu
 
 Google Drive: link: https://drive.google.com/drive/folders/1tTMs8vf7Z4FAjwCg2aQVGA_pc9O_VpS1?usp=sharing
 
-we will put the new models soon.
+new models:
+we have put the new models now.
+link: https://bhpan.buaa.edu.cn:443/link/2DFC695B03950A85EF137D8D0FEB62CD
+有效期限：2023-04-01 23:59
 
 
 ## Serialize
