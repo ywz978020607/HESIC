@@ -43,7 +43,7 @@ At the same time, we have completed the serialization part of the code, and used
 
 Result.
 
-![Instereo2k](./cvpr-Instereo2k.png)
+![Instereo2k](./cvpr-fix.png)
 
 
 
