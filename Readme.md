@@ -100,3 +100,6 @@ cd ywz/DSIC
 
 ## Migration on Mindspore
 https://github.com/ywz978020607/2021Summer-Image-Compression
+
+## Future and better:
+[MASIC-link](https://github.com/ywz978020607/MASIC)
